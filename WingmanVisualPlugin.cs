@@ -4,9 +4,15 @@ using BepInEx.Logging;
 using HarmonyLib;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.SceneManagement;
+using UnityEngine.Audio;
+using UnityEngine.Networking;
 using Mirage;
+using System;
 using System.Linq;
+using System.IO;
 using System.Collections.Generic;
+//using NuclearOption.Networking;
 
 namespace WingmanVisual
 {
@@ -16,19 +22,45 @@ namespace WingmanVisual
         // Mod identification
         private const string MyGUID = "com.gnol.wingmanvisual";
         private const string PluginName = "WingmanVisual";
-        private const string VersionString = "1.0.0";
+        private const string VersionString = "1.1.0";
 
         public static ManualLogSource Log { get; private set; }
 
         // Config entries
-        private const string CurrentConfigVersion = "c1.0";
-        public static ConfigEntry<bool> Enabled { get; set; }
+        private const string CurrentConfigVersion = "c1.1";
 
+        public static ConfigEntry<bool> Enabled;
         internal static ConfigEntry<KeyboardShortcut> AddSpectatedToWing;
+        internal static ConfigEntry<KeyboardShortcut> AddRemoveFriend;
+        public static ConfigEntry<string> FriendsConfigString;
+        public static ConfigEntry<string> WingColorHexConfig;
+        public static ConfigEntry<string> FriendColorHexConfig;
+        public static ConfigEntry<string> EnemyFriendColorHexConfig;
+        public static ConfigEntry<bool> ShouldVoiceSocialFeatures;
 
+        // Audio Files
+        private static Dictionary<string, AudioClip> loadedClips = new Dictionary<string, AudioClip>();
+
+        private static string soundsFolder = Path.Combine(Paths.PluginPath, "WingmanVisual", "sounds");
+
+        // Variables
         public static string CurrentlySpectating = "";
 
+        public static string SpectateTargetFaction = "";
+
+        public static bool IsSpectating = false;
+
         public static HashSet<string> wingMembers = new HashSet<string>();
+
+        public static HashSet<string> friendsList = new HashSet<string>();
+
+        public static Color wingColor;
+
+        public static Color friendColor;
+
+        public static Color enemyFriendColor;
+
+        public static string ourFaction;
 
         private void Awake()
         {
@@ -38,6 +70,8 @@ namespace WingmanVisual
             go.SetActive(true);
             Log = Logger;
             Logger.LogInfo($"{PluginName} v{VersionString} is loading...");
+
+            LoadCustomSounds();
 
             var savedVersion = Config.Bind(
                 section: "Internal",
@@ -51,7 +85,8 @@ namespace WingmanVisual
                 key: "Enabled",
                 defaultValue: true,
                 configDescription: new ConfigDescription(
-                    "Whether the mod is active."
+                    "Whether the mod is active.\n" +
+                    "---"
                 )
             );
 
@@ -60,17 +95,93 @@ namespace WingmanVisual
                 key: "AddSpectatedToWing",
                 defaultValue: new KeyboardShortcut(KeyCode.P),
                 configDescription: new ConfigDescription(
-                    "When spectating anything or anyone, press this key to add them to your wing.\n" +
+                    "When spectating anything or anyone, press this key to add or remove them from your wing.\n" +
                     "Examples of keys you can enter:\n" +
                     "- Letters: A, B, C, ...\n" +
                     "- Numbers: Alpha0, Alpha1, ...\n" +
                     "- Function keys: F1, F2, ...\n" +
                     "- Special keys: Space, Enter, Escape, Tab\n" +
                     "- Modifiers: LeftShift, RightShift, LeftControl, RightControl\n" +
-                    "- Arrow keys: UpArrow, DownArrow, LeftArrow, RightArrow"
+                    "- Arrow keys: UpArrow, DownArrow, LeftArrow, RightArrow\n" +
+                    "---"
                 )
             );
 
+            AddRemoveFriend = Config.Bind(
+                section: "Controls",
+                key: "AddSpectatedToFriends",
+                defaultValue: new KeyboardShortcut(KeyCode.O),
+                configDescription: new ConfigDescription(
+                    "When spectating anything or anyone, press this key to add or remove them from your friends list.\n" +
+                    "Examples of keys you can enter:\n" +
+                    "- Letters: A, B, C, ...\n" +
+                    "- Numbers: Alpha0, Alpha1, ...\n" +
+                    "- Function keys: F1, F2, ...\n" +
+                    "- Special keys: Space, Enter, Escape, Tab\n" +
+                    "- Modifiers: LeftShift, RightShift, LeftControl, RightControl\n" +
+                    "- Arrow keys: UpArrow, DownArrow, LeftArrow, RightArrow\n" +
+                    "---"
+                )
+            );
+
+            FriendsConfigString = Config.Bind(
+                section: "Social",
+                key: "FriendsList",
+                defaultValue: "",
+                configDescription: new ConfigDescription(
+                    "This can be populated manually or you can add people in-game via keybind.\n" +
+                    "Usernames are CASE-SENSITIVE. Separate with a comma.\n" +
+                    "eg: FriendsList = Jessie, James, GiovanniSakaki\n" +
+                    "---"
+                )
+            );
+            LoadFriendsList();
+
+            WingColorHexConfig = Config.Bind(
+                section: "Colors",
+                key: "WingColor",
+                defaultValue: "C180FF",
+                configDescription: new ConfigDescription(
+                    "Color of Wing members on the map.\n" +
+                    "Hex color. With or without the #.\n" +
+                    "---"
+                )
+            );
+            wingColor = ExtractColorFromConfig(WingColorHexConfig.Value, new Color(193, 128, 255, 255));
+
+            FriendColorHexConfig = Config.Bind(
+                section: "Colors",
+                key: "FriendColor",
+                defaultValue: "FFF12B",
+                configDescription: new ConfigDescription(
+                    "Color of friends on the map.\n" +
+                    "Hex color. With or without the #.\n" +
+                    "---"
+                )
+            );
+            friendColor = ExtractColorFromConfig(FriendColorHexConfig.Value, new Color(255, 241, 43, 255));
+
+            EnemyFriendColorHexConfig = Config.Bind(
+                section: "Colors",
+                key: "EnemyFriendColor",
+                defaultValue: "FFB3B3",
+                configDescription: new ConfigDescription(
+                    "Color of friends on the map when they are on the opposing team.\n" +
+                    "Hex color. With or without the #.\n" +
+                    "---"
+                )
+            );
+            enemyFriendColor = ExtractColorFromConfig(EnemyFriendColorHexConfig.Value, new Color(255, 179, 179, 255));
+
+            ShouldVoiceSocialFeatures = Config.Bind(
+                section: "General",
+                key: "ShouldVoiceSocialFeatures",
+                defaultValue: true,
+                configDescription: new ConfigDescription(
+                    "Set to 'true' to hear audio feedback for social features.\n" +
+                    "---"
+                )
+            );
 
             if (savedVersion != CurrentConfigVersion)
             {
@@ -92,29 +203,83 @@ namespace WingmanVisual
                 Logger.LogInfo("Config automatically updated.");
             }
 
-            var harmony = new Harmony(MyGUID);
-            harmony.PatchAll();
+            if (Enabled.Value)
+            {
+                SceneManager.sceneLoaded += OnSceneLoaded;
+                var harmony = new Harmony(MyGUID);
+                harmony.PatchAll();
+            }
 
             Logger.LogInfo($"{PluginName} v{VersionString} loaded successfully. State: {(Enabled.Value ? "Enabled" : "Disabled")}");
         }
 
+        private void onDestroy()
+        {
+            if (!Enabled.Value)
+                return;
+            SceneManager.sceneLoaded -= OnSceneLoaded;
+        }
+
+        private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+        {
+            string sceneName = scene.name.ToLowerInvariant();
+
+            if (sceneName.Contains("mainmenu"))
+            {
+                wingMembers.Clear();
+            }
+        }
+
         private void Update()
         {
+            if (!Enabled.Value)
+                return;
+            if (!IsSpectating)
+                return;
             if (AddSpectatedToWing.Value.IsDown())
             {
                 if (!string.IsNullOrWhiteSpace(CurrentlySpectating))
                 {
-                    if (wingMembers.Remove(CurrentlySpectating))
+                    if (string.Equals(SpectateTargetFaction, ourFaction, StringComparison.OrdinalIgnoreCase))
                     {
-                        Log.LogInfo($"Removed {CurrentlySpectating} from wing.\nAll members:");
-                        Log.LogInfo(string.Join(", ", wingMembers));
+                        if (wingMembers.Remove(CurrentlySpectating))
+                        {
+                            Log.LogInfo($"Removed {CurrentlySpectating} from wing.\nAll members:");
+                            Log.LogInfo(string.Join(", ", wingMembers));
+                            if (ShouldVoiceSocialFeatures.Value)
+                                PlayCustomSound("wingmanRemoved");
+                        }
+                        else
+                        {
+                            wingMembers.Add(CurrentlySpectating);
+                            Log.LogInfo($"Added {CurrentlySpectating} to wing.\nAll members:");
+                            Log.LogInfo(string.Join(", ", wingMembers));
+                            if (ShouldVoiceSocialFeatures.Value)
+                                PlayCustomSound("wingmanAdded");
+                        }
+                    }
+                }
+            }
+            else if (AddRemoveFriend.Value.IsDown())
+            {
+                if (!string.IsNullOrWhiteSpace(CurrentlySpectating))
+                {
+                    if (friendsList.Remove(CurrentlySpectating))
+                    {
+                        Log.LogInfo($"Removed {CurrentlySpectating} from friends list.\nFriends:");
+                        Log.LogInfo(string.Join(", ", friendsList));
+                        if (ShouldVoiceSocialFeatures.Value)
+                            PlayCustomSound("friendRemoved");
                     }
                     else
                     {
-                        wingMembers.Add(CurrentlySpectating);
-                        Log.LogInfo($"Added {CurrentlySpectating} to wing.\nAll members:");
-                        Log.LogInfo(string.Join(", ", wingMembers));
+                        friendsList.Add(CurrentlySpectating);
+                        Log.LogInfo($"Added {CurrentlySpectating} to friends list.\nFriends:");
+                        Log.LogInfo(string.Join(", ", friendsList));
+                        if (ShouldVoiceSocialFeatures.Value)
+                            PlayCustomSound("friendAdded");
                     }
+                    SaveFriendsListToConfig();
                 }
             }
         }
@@ -135,6 +300,141 @@ namespace WingmanVisual
             return output;
         }
 
+        private Color ExtractColorFromConfig(string rawHex, Color fallbackColor)
+        {
+            if (string.IsNullOrWhiteSpace(rawHex))
+                return fallbackColor;
+
+            string hex = rawHex.StartsWith("#") ? rawHex.Substring(1) : rawHex;
+
+            if (hex.Length != 6)
+            {
+                Log.LogInfo("Error parsing hex from config. Using fallback color.");
+                return fallbackColor;
+            }
+
+            try
+            {
+                byte r = byte.Parse(hex.Substring(0, 2), System.Globalization.NumberStyles.HexNumber);
+                byte g = byte.Parse(hex.Substring(2, 2), System.Globalization.NumberStyles.HexNumber);
+                byte b = byte.Parse(hex.Substring(4, 2), System.Globalization.NumberStyles.HexNumber);
+
+                return new Color(
+                    r / 255f,
+                    g / 255f,
+                    b / 255f,
+                    1f
+                );
+            }
+            catch
+            {
+                Log.LogInfo("Error parsing hex from config. Using fallback color.");
+                return fallbackColor;
+            }
+        }
+
+        private void LoadFriendsList()
+        {
+            friendsList.Clear();
+
+            string value = FriendsConfigString.Value;
+            if (string.IsNullOrEmpty(value))
+                return;
+
+            string[] parts = value.Split(',');
+
+            for (int i = 0; i < parts.Length; i++)
+            {
+                string name = parts[i].Trim();
+                if (!string.IsNullOrEmpty(name))
+                {
+                    friendsList.Add(name); // HashSet is case-sensitive by default
+                }
+            }
+        }
+
+        private void SaveFriendsListToConfig()
+        {
+            // Serialize HashSet to comma-separated string
+            string[] array = new string[friendsList.Count];
+            friendsList.CopyTo(array);
+
+            FriendsConfigString.Value = string.Join(",", array);
+
+            // Force write to disk
+            Config.Save();
+        }
+
+        private void LoadCustomSounds()
+        {
+            var soundList = new List<KeyValuePair<string, string>>();
+
+            soundList.Add(new KeyValuePair<string, string>("wingmanAdded", "wing_added.mp3"));
+            soundList.Add(new KeyValuePair<string, string>("wingmanRemoved", "wing_removed.mp3"));
+            soundList.Add(new KeyValuePair<string, string>("friendAdded", "friend_added.mp3"));
+            soundList.Add(new KeyValuePair<string, string>("friendRemoved", "friend_removed.mp3"));
+
+            foreach (KeyValuePair<string, string> entry in soundList)
+            {
+                string key = entry.Key;
+                string filename = entry.Value;
+                string fullPath = Path.Combine(soundsFolder, filename);
+
+                if (!File.Exists(fullPath))
+                {
+                    Logger.LogWarning("Sound file not found: " + fullPath);
+                    continue;
+                }
+
+                Logger.LogInfo("Attempting to load: " + fullPath);
+
+                using (UnityWebRequest uwr = UnityWebRequestMultimedia.GetAudioClip("file://" + fullPath, AudioType.MPEG))
+                {
+                    uwr.SendWebRequest();
+
+                    while (!uwr.isDone) { }
+
+                    if (uwr.result == UnityWebRequest.Result.Success)
+                    {
+                        AudioClip clip = DownloadHandlerAudioClip.GetContent(uwr);
+                        if (clip != null)
+                        {
+                            loadedClips.Add(key, clip);
+                            Logger.LogInfo("Successfully loaded sound: " + filename);
+                        }
+                        else
+                        {
+                            Logger.LogError("Clip was null after loading: " + filename);
+                        }
+                    }
+                    else
+                    {
+                        Logger.LogError("Failed to load " + filename + ": " + uwr.error);
+                    }
+                }
+            }
+        }
+
+        public static void PlayCustomSound(string soundKey)
+        {
+            if (loadedClips == null)
+            {
+                return;
+            }
+
+            AudioClip clip;
+            if (!loadedClips.TryGetValue(soundKey, out clip) || clip == null)
+            {
+                Log.LogWarning("Cannot play sound - not loaded or null: " + soundKey);
+                return;
+            }
+
+            SoundManager.PlayInterfaceOneShot(clip);
+
+            // SoundManager.PlayMenuOneShot(clip);
+            // SoundManager.PlayRadarWarningOneShot(clip);
+            // SoundManager.PlayEffectOneShot(clip);
+        }
     }
 
     [HarmonyPatch(typeof(MapIcon), nameof(MapIcon.UpdateColor))]
@@ -149,15 +449,33 @@ namespace WingmanVisual
             if (unitIcon.unit == null || unitIcon.iconImage == null)
                 return;
 
-            string unitName = WingmanVisual.StripAircraftName(unitIcon.unit.unitName);
-            bool isFriend = WingmanVisual.wingMembers.Contains(unitName);
-
+            string unitNameRaw = unitIcon.unit?.unitName ?? "";
+            string unitName = WingmanVisual.StripAircraftName(unitNameRaw);
+            string unitFaction = unitIcon.unit?.NetworkHQ?.name ?? "";
+            bool isWing = WingmanVisual.wingMembers.Contains(unitName);
+            bool isFriend = WingmanVisual.friendsList.Contains(unitName);
+            WingmanVisual.ourFaction = SceneSingleton<DynamicMap>.i?.HQ?.name ?? "NULL";
             if (isFriend)
             {
-                Color green = new Color(1.0f, 0.27f, 0.63f);
-                green.a = unitIcon.iconImage.color.a;
-
-                unitIcon.iconImage.color = green;
+                Color col = WingmanVisual.friendColor;
+                if (!string.IsNullOrWhiteSpace(WingmanVisual.ourFaction))
+                {
+                    if (!string.IsNullOrWhiteSpace(unitFaction))
+                    {
+                        if (!string.Equals(unitFaction, WingmanVisual.ourFaction, StringComparison.OrdinalIgnoreCase))
+                        {
+                            col = WingmanVisual.enemyFriendColor;
+                        }
+                    }
+                }
+                col.a = unitIcon.iconImage.color.a;
+                unitIcon.iconImage.color = col;
+            }
+            else if (isWing)
+            {
+                Color col = WingmanVisual.wingColor;
+                col.a = unitIcon.iconImage.color.a;
+                unitIcon.iconImage.color = col;
             }
         }
     }
@@ -170,8 +488,28 @@ namespace WingmanVisual
             if (unit != null)
             {
                 string username = WingmanVisual.StripAircraftName(unit.unitName);
+                string faction = unit.NetworkHQ.name;
                 WingmanVisual.CurrentlySpectating = username;
+                WingmanVisual.SpectateTargetFaction = faction;
             }
+        }
+    }
+
+    [HarmonyPatch(typeof(GameplayUI), nameof(GameplayUI.ShowSpectatorPanel))]
+    internal static class GameplayUI_ShowSpectatorPanel_Patch
+    {
+        static void Postfix()
+        {
+            WingmanVisual.IsSpectating = true;
+        }
+    }
+
+    [HarmonyPatch(typeof(GameplayUI), nameof(GameplayUI.HideSpectatorPanel))]
+    internal static class GameplayUI_HideSpectatorPanel_Patch
+    {
+        static void Postfix()
+        {
+            WingmanVisual.IsSpectating = false;
         }
     }
 }
