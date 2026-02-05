@@ -2,42 +2,35 @@
 
 # Wingman Visual for Nuclear Option
 
-**A client-side mod that adds simple wing / party-style visual tracking to Nuclear Option.**
+**A client-side mod that adds simple wing and friend visual tracking to Nuclear Option.**
 
 ![Game Banner or Screenshot](preview_screenshot.png)
 
 ## About
 
-This mod adds a lightweight **"wingman" marking system** to Nuclear Option.
+This mod makes it significantly easier to spot and coordinate with your friends and wingmates in **Nuclear Option**.
 
-When you are **spectating another player** (via the map, while not in an aircraft), you can press **`P`** (default, configurable) to add **or remove** that player from your **Wing**.
+**Core Functionality**  
+Spectate a player. You can do this while not piloting an aircraft then click on a player on the map. Use simple keybinds to manage your groups:  
+- Press **P** to add or remove the selected player to/from your temporary **Wing**.  
+- Press **O** to add or remove the selected player to/from your persistent **Friends list**.
 
-Wing members are:
-- Highlighted on the **map** using a **distinct color** (separate from standard blue friendly / red enemy markers).
-- Easier to locate for **spectating**, **forming up**, or just keeping track of who you're flying with.
+**Wing** members and **Friends** receive distinct, customizable colors on the map.
 
-The goal is to provide a simple, unobtrusive way to visually group up with other players — especially useful on busy servers or when coordinating flights without full squad mechanics.
+**Persistence & Reset Rules**  
+- Your **Wing** is temporary and automatically clears when you return to the main menu.  
+- Your **Friends list** is saved permanently and remembered across game launches and sessions.
 
-Once installed, the mod is **enabled by default**.
-
-## Features
-
-- **Wing / party-style player marking**
-  - Add or remove players from your Wing while spectating.
-  - Wing members are displayed with a unique map color for easy identification.
-- **Configurable keybind**
-  - Default key is **`P`**, adjustable via the auto-generated config file.
-- **Client-side only**
-  - No server installation required.
-  - Other players do not need the mod installed.
+**Customization**  
+All keybinds, highlight colors, and optional audio feedback are fully configurable via a straightforward config file.
 
 ## Known Limitations
-
-- **Players only (intended)**
   - This mod is designed to mark **players**, not AI units.
+  - Friends are stored via their display name in-game. If they change their display name you will need to add them as a friend again. If they go back to a name you have previously added, the mod will continue to work. You can manually clear out old names from inside the config, though this isn't really necessary unless it's a very common name you suspect someone else might use.
 - **NPC edge case**
-  - If you add an NPC unit to the Wing, **all units of the same vehicle type** will be highlighted.
+  - If you add an NPC unit, **all units of the same vehicle type** will be highlighted.
   - This is a known problem and not the intended use.
+  - If this happens: Simply spectate **any** of those units and press the appropriate key to remove them from that list.
 
 ## Requirements
 
