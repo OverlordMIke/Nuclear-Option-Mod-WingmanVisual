@@ -12,7 +12,6 @@ using System;
 using System.Linq;
 using System.IO;
 using System.Collections.Generic;
-//using NuclearOption.Networking;
 
 namespace WingmanVisual
 {
@@ -22,12 +21,12 @@ namespace WingmanVisual
         // Mod identification
         private const string MyGUID = "com.gnol.wingmanvisual";
         private const string PluginName = "WingmanVisual";
-        private const string VersionString = "1.1.0";
+        private const string VersionString = "1.1.2";
 
         public static ManualLogSource Log { get; private set; }
 
         // Config entries
-        private const string CurrentConfigVersion = "c1.1";
+        private const string CurrentConfigVersion = "c1.2";
 
         public static ConfigEntry<bool> Enabled;
         internal static ConfigEntry<KeyboardShortcut> AddSpectatedToWing;
@@ -54,13 +53,18 @@ namespace WingmanVisual
 
         public static HashSet<string> friendsList = new HashSet<string>();
 
+        public static Color defaultWingColor = new Color(193, 128, 255, 255);
         public static Color wingColor;
 
+        public static Color defaultFriendColor = new Color(255, 241, 43, 255);
         public static Color friendColor;
 
+        public static Color defaultEnemyFriendColor = new Color(255, 179, 179, 255);
         public static Color enemyFriendColor;
 
         public static string ourFaction;
+
+        public static bool IsChatOpen = false;
 
         private void Awake()
         {
@@ -77,7 +81,13 @@ namespace WingmanVisual
                 section: "Internal",
                 key: "ConfigVersion",
                 defaultValue: "",
-                "Do not touch - used for auto-updating config."
+                configDescription: new ConfigDescription(
+                    "Do not touch - used for auto-updating config.\n" +
+                    "If you accidentally change this, just set it back to the above default.\n" +
+                    "Alternatively, you can delete this config and launch the game to generate a clean one.",
+                    null,
+                    new ConfigurationManagerAttributes { Browsable = false }
+                )
             ).Value;
 
             Enabled = Config.Bind(
@@ -136,6 +146,7 @@ namespace WingmanVisual
                 )
             );
             LoadFriendsList();
+            FriendsConfigString.SettingChanged += ConfigSettingChanged;
 
             WingColorHexConfig = Config.Bind(
                 section: "Colors",
@@ -147,7 +158,8 @@ namespace WingmanVisual
                     "---"
                 )
             );
-            wingColor = ExtractColorFromConfig(WingColorHexConfig.Value, new Color(193, 128, 255, 255));
+            wingColor = ExtractColorFromConfig(WingColorHexConfig.Value, defaultWingColor);
+            WingColorHexConfig.SettingChanged += ConfigSettingChanged;
 
             FriendColorHexConfig = Config.Bind(
                 section: "Colors",
@@ -159,7 +171,8 @@ namespace WingmanVisual
                     "---"
                 )
             );
-            friendColor = ExtractColorFromConfig(FriendColorHexConfig.Value, new Color(255, 241, 43, 255));
+            friendColor = ExtractColorFromConfig(FriendColorHexConfig.Value, defaultFriendColor);
+            FriendColorHexConfig.SettingChanged += ConfigSettingChanged;
 
             EnemyFriendColorHexConfig = Config.Bind(
                 section: "Colors",
@@ -171,7 +184,8 @@ namespace WingmanVisual
                     "---"
                 )
             );
-            enemyFriendColor = ExtractColorFromConfig(EnemyFriendColorHexConfig.Value, new Color(255, 179, 179, 255));
+            enemyFriendColor = ExtractColorFromConfig(EnemyFriendColorHexConfig.Value, defaultEnemyFriendColor);
+            EnemyFriendColorHexConfig.SettingChanged += ConfigSettingChanged;
 
             ShouldVoiceSocialFeatures = Config.Bind(
                 section: "General",
@@ -192,7 +206,11 @@ namespace WingmanVisual
                     key: "ConfigVersion",
                     defaultValue: CurrentConfigVersion,
                     configDescription: new ConfigDescription(
-                        "Do not touch - used for auto-updating config."
+                        "Do not touch - used for auto-updating config.\n" +
+                        "If you accidentally change this, just set it back to the above default.\n" +
+                        "Alternatively, you can delete this config and launch the game to generate a clean one.",
+                        null,
+                        new ConfigurationManagerAttributes { Browsable = false }
                     )
                 );
 
@@ -222,11 +240,15 @@ namespace WingmanVisual
 
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
+            if (!Enabled.Value)
+                return;
+
             string sceneName = scene.name.ToLowerInvariant();
 
             if (sceneName.Contains("mainmenu"))
             {
                 wingMembers.Clear();
+                CurrentlySpectating = "";
             }
         }
 
@@ -234,7 +256,7 @@ namespace WingmanVisual
         {
             if (!Enabled.Value)
                 return;
-            if (!IsSpectating)
+            if (!IsSpectating || IsChatOpen)
                 return;
             if (AddSpectatedToWing.Value.IsDown())
             {
@@ -283,6 +305,37 @@ namespace WingmanVisual
                 }
             }
         }
+
+        private void ConfigSettingChanged(object sender, System.EventArgs e)
+        {
+            SettingChangedEventArgs settingChangedEventArgs = e as SettingChangedEventArgs;
+
+            if (settingChangedEventArgs == null)
+            {
+                return;
+            }
+
+            if (settingChangedEventArgs.ChangedSetting.Definition.Key == "WingColor")
+            {
+                wingColor = ExtractColorFromConfig(WingColorHexConfig.Value, defaultWingColor);
+            }
+
+            if (settingChangedEventArgs.ChangedSetting.Definition.Key == "FriendColor")
+            {
+                wingColor = ExtractColorFromConfig(WingColorHexConfig.Value, defaultWingColor);
+            }
+
+            if (settingChangedEventArgs.ChangedSetting.Definition.Key == "EnemyFriendColor")
+            {
+                wingColor = ExtractColorFromConfig(WingColorHexConfig.Value, defaultWingColor);
+            }
+
+            if (settingChangedEventArgs.ChangedSetting.Definition.Key == "FriendsList")
+            {
+                LoadFriendsList();
+            }
+        }
+
         public static string StripAircraftName(string unformatted)
         {
             string input = unformatted;
@@ -438,10 +491,14 @@ namespace WingmanVisual
     }
 
     [HarmonyPatch(typeof(MapIcon), nameof(MapIcon.UpdateColor))]
+    [HarmonyAfter("com.hellcat92.vanillaiconsplus_1.5.1")]
     internal static class MapIcon_UpdateColor_Patch
     {
         static void Postfix(MapIcon __instance)
         {
+            if (!WingmanVisual.Enabled.Value)
+                return;
+
             var unitIcon = __instance as UnitMapIcon;
             if (unitIcon == null)
                 return;
@@ -485,6 +542,9 @@ namespace WingmanVisual
     {
         static void Postfix(Unit unit)
         {
+            if (!WingmanVisual.Enabled.Value)
+                return;
+
             if (unit != null)
             {
                 string username = WingmanVisual.StripAircraftName(unit.unitName);
@@ -500,6 +560,9 @@ namespace WingmanVisual
     {
         static void Postfix()
         {
+            if (!WingmanVisual.Enabled.Value)
+                return;
+
             WingmanVisual.IsSpectating = true;
         }
     }
@@ -509,7 +572,35 @@ namespace WingmanVisual
     {
         static void Postfix()
         {
+            if (!WingmanVisual.Enabled.Value)
+                return;
+
             WingmanVisual.IsSpectating = false;
+            WingmanVisual.CurrentlySpectating = "";
+        }
+    }
+
+    [HarmonyPatch(typeof(ChatBox), "OnEnable")]
+    static class ChatBox_OnEnable_Patch
+    {
+        static void Postfix()
+        {
+            if (!WingmanVisual.Enabled.Value)
+                return;
+
+            WingmanVisual.IsChatOpen = true;
+        }
+    }
+
+    [HarmonyPatch(typeof(ChatBox), nameof(ChatBox.OnDisable))]
+    static class ChatBox_OnDisable_Patch
+    {
+        static void Postfix()
+        {
+            if (!WingmanVisual.Enabled.Value)
+                return;
+
+            WingmanVisual.IsChatOpen = false;
         }
     }
 }

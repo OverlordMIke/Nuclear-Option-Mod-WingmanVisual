@@ -79,6 +79,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="ConfigurationManagerAttributes.cs" />
     <Compile Include="MonoBehaviours\WingmanVisualComponent.cs" />
     <Compile Include="WingmanVisualPlugin.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
